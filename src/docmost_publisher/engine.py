@@ -329,11 +329,18 @@ def validate_page(page: dict, space_id: str, parent: str | None = None, *, check
 
 def select_space(client: DocmostClient, config: dict) -> dict:
     spaces = client.spaces()
-    matches = [s for s in spaces if s["id"] == config["space_id"]] if config["space_id"] else [s for s in spaces if s.get("name") == config["space"]]
+    wanted = config["space"]
+    if config["space_id"]:
+        matches = [s for s in spaces if s["id"] == config["space_id"]]
+    else:
+        # Exact name wins; otherwise accept the space slug (e.g. "geomar" for "Geomar").
+        matches = [s for s in spaces if s.get("name") == wanted] or [s for s in spaces if s.get("slug") == wanted]
     if len(matches) != 1:
-        raise PublisherError(f"Expected one accessible matching space, found {len(matches)}. Use docmost-publish spaces and pin space_id.")
+        available = ", ".join(f"{s.get('name')!r} (slug {s.get('slug')!r})" for s in spaces) or "none"
+        raise PublisherError(f"Expected one accessible matching space, found {len(matches)}. "
+                             f"Available: {available}. Use docmost-publish spaces and pin space_id.")
     space = matches[0]
-    if config["space_id"] and config["space"] and space.get("name") != config["space"]:
+    if config["space_id"] and wanted and wanted not in {space.get("name"), space.get("slug")}:
         raise PublisherError("Configured space_id and space name disagree")
     if not isinstance(space.get("slug"), str) or not space["slug"]:
         raise PublisherError("Space response lacks slug; cannot construct Docmost page URLs")

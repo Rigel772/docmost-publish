@@ -106,7 +106,7 @@ def server():
                         pending.extend(c['id'] for c in state.pages.values() if c['parentPageId']==p and not c['deletedAt'])
                 return self.send()
             if endpoint == 'pages/update':
-                if state.fail_update and payload['title']=='New file':
+                if state.fail_update and payload['title']=='file':
                     return self.send(status=500)
                 p = state.pages[payload['pageId']]
                 p['title'] = payload['title']
@@ -164,7 +164,7 @@ def test_complete_publish_twice_reuses_token_and_root(project, server, monkeypat
     assert not server.pages['root-1']['deletedAt']
     assert not server.pages['unrelated']['deletedAt']
     active = [p for p in server.pages.values() if not p['deletedAt']]
-    assert {p['title'] for p in active} == {'ERP documentation','Do not touch','nested','New file'}
+    assert {p['title'] for p in active} == {'ERP documentation','Do not touch','nested','file'}
     assert '/api/files/attachment-1/image.png' in server.pages['root-1']['markdown']
     assert 'nested/file.md' not in server.pages['root-1']['markdown']
     assert server.logins == 1 and server.logouts == 0
@@ -194,15 +194,36 @@ def test_local_check_has_zero_network(project, server):
 
 
 def test_broken_source_fails_before_login_or_deletion(project, server):
-    (project[0]/'README.md').write_text('[bad](missing.md)')
+    (project[0]/'readme.md').write_text('# Duplicate index')
     assert main(['--yes','--no-input']) == 1
     assert not server.calls
+
+
+def test_space_matched_by_slug(project, server, cfg):
+    cfg['docmost']['space'] = 'engineering'
+    (project[0]/'.docmost.yaml').write_text(yaml.safe_dump(cfg))
+    assert main(['--yes','--no-input']) == 0
+
+
+def test_unknown_space_lists_available(project, server, cfg, caplog):
+    cfg['docmost']['space'] = 'nope'
+    (project[0]/'.docmost.yaml').write_text(yaml.safe_dump(cfg))
+    assert main(['--yes','--no-input']) == 1
+    assert "'Engineering' (slug 'engineering')" in caplog.text
+
+
+def test_broken_links_do_not_block_publication(project, server, capsys):
+    (project[0]/'README.md').write_text('[bad](missing.md) [code](../../app/x.py)')
+    assert main(['--yes','--no-input']) == 0
+    out = capsys.readouterr().out
+    assert 'WARNING: Missing/unpublished local target' in out
+    assert 'WARNING: Path escapes source directory' in out
 
 
 def test_midrun_failure_journal_and_no_retry(project, server):
     server.fail_update = True
     assert main(['--yes','--no-input']) == 1
-    writes = [p for endpoint,p in server.calls if endpoint=='pages/update' and p['title']=='New file']
+    writes = [p for endpoint,p in server.calls if endpoint=='pages/update' and p['title']=='file']
     assert len(writes)==1
     journal = next((project[1]/'.local/state/docmost-publisher/runs').glob('*.json'))
     data = json.loads(journal.read_text())

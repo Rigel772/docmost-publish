@@ -1,5 +1,15 @@
 # Docmost folder publisher
 
+> **Updating after code changes:** the installed `docmost-publish` is a copy in
+> `~/.local/share/docmost-publisher/venv`, not a link to this checkout. Rerun
+> `./install.sh` after editing the source; it reinstalls this folder into the same
+> environment even when the version number is unchanged. To have edits take effect
+> immediately instead, do a one-time editable install:
+>
+> ```sh
+> ~/.local/share/docmost-publisher/venv/bin/pip install -e ~/code/docmost-publish
+> ```
+
 A Linux CLI that treats a local Markdown folder as authoritative and replaces one
 Docmost page subtree on every publication. There is no synchronization database,
 merge logic, or persistent per-file identity mapping. Home-directory files hold
@@ -264,11 +274,11 @@ becomes:
 Engineering [existing space]
   ERP documentation [retained root; content from docs/README.md]
     api [generated parent page with child links]
-      Authentication
-    Architecture [content from architecture/README.md]
+      authentication
+    architecture [content from architecture/README.md]
       storage [generated parent page with child links]
-        S3 storage
-      Database
+        s3
+      database
 ```
 
 A directory containing publishable Markdown anywhere in its subtree becomes a
@@ -280,10 +290,11 @@ Directory traversal and sibling creation are deterministic: directories first,
 then files, each sorted by name (case-insensitive, with exact spelling as tie-break).
 This is a deterministic publisher order, not a copy of any existing manual order.
 
-Titles use YAML front-matter `title`, then the first Markdown heading, then the
-file stem/directory name. The configured root title overrides the top-level index
-title. Front matter is stripped from published bodies. Headings themselves are
-retained, so a first heading may also appear in the page body.
+Page titles are the exact file and directory names, unchanged: same spelling,
+same capitalization, without the `.md`/`.markdown` extension
+(`0006-tasks-module.md` publishes as `0006-tasks-module`). Headings and front matter never rename a page. The
+configured root title names the root page. Front matter is stripped from
+published bodies.
 
 ## Links and attachments
 
@@ -304,11 +315,14 @@ Defaults allow PNG, JPG/JPEG, GIF, WEBP, AVIF, BMP, PDF, TXT, and CSV. Configure
 becomes a page, not an attachment. Asset size defaults to 20 MiB; server or reverse
 proxy limits may be lower. SVG is not included in the default allowlist.
 
-Missing local targets, excluded targets, paths escaping the source, symlinks,
-unsupported schemes, oversized inputs, duplicate indexes, invalid/duplicate YAML
-keys, and an unexpectedly empty tree stop local validation before login/deletion.
-Raw HTML containing local links/images, CSS `url()`, or `srcset` is rejected; use
-Markdown link/image syntax. Unsupported wiki-link syntax is not resolved.
+Links and images that cannot be resolved (missing or excluded targets, paths
+escaping the source, symlinks, unsupported schemes, non-allowlisted or oversized
+attachments) never stop publication: they are reported as warnings and published
+with their original URL, and their targets are never read or uploaded. The same
+applies to raw HTML with local links/images, CSS `url()`, or `srcset`. Unsupported
+wiki-link syntax is not resolved. Oversized Markdown, duplicate indexes,
+invalid/duplicate YAML keys, and an unexpectedly empty tree still stop local
+validation before login/deletion.
 
 Markdown is parsed and reserialized, not preserved byte-for-byte. CommonMark,
 tables, task lists, strike-through, footnotes, math, and fenced-code serialization

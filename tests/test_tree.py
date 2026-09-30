@@ -45,9 +45,16 @@ def test_asset_snapshotted_and_referenced(tree_factory):
     assert '![Alt]' in result and '/files/1/x.png' in result
 
 
-def test_frontmatter_title_not_published(tree_factory):
+def test_titles_are_exact_file_and_directory_names(tree_factory):
+    tree = tree_factory({'README.md':'# Root heading', '0006-Tasks-Module.md':'---\ntitle: Explicit\n---\n# Heading',
+                         'ADR/README.md':'# ADR heading', 'ADR/x.md':'body', 'Misc Notes/y.md':'# Y'})
+    titles = {k: n.title for k, n in tree.nodes.items()}
+    assert titles == {'.':'ERP documentation', '0006-Tasks-Module.md':'0006-Tasks-Module', 'ADR':'ADR',
+                      'ADR/x.md':'x', 'Misc Notes':'Misc Notes', 'Misc Notes/y.md':'y'}
+
+
+def test_frontmatter_not_published(tree_factory):
     tree = tree_factory({'README.md':'root', 'a.md':'---\ntitle: Explicit\nprivate: not-published\n---\n# Heading\nBody'})
-    assert tree.nodes['a.md'].title == 'Explicit'
     result = tree.render(tree.nodes['a.md'], urls(tree), lambda *_: '')
     assert 'not-published' not in result
 
@@ -55,14 +62,24 @@ def test_frontmatter_title_not_published(tree_factory):
 def test_generated_index(tree_factory):
     tree = tree_factory({'a/b.md':'# Child'})
     result = tree.render(tree.nodes['a'], urls(tree), lambda *_: '')
-    assert '## Contents' in result and '[Child]' in result
+    assert '## Contents' in result and '[b]' in result
 
 
 @pytest.mark.parametrize('body', ['[broken](missing.md)', '![missing](missing.png)', '[secret](../secret.txt)',
                                   '[secret](.env)', '<img src="local.png">', '[local](file:///tmp/a.md)'])
-def test_invalid_links_fail_before_network(tree_factory, body):
-    with pytest.raises(PublisherError):
-        tree_factory({'README.md':body})
+def test_invalid_links_warn_and_are_kept(tree_factory, body):
+    tree = tree_factory({'README.md':body})
+    assert tree.warnings
+    assert not tree.assets
+    result = tree.render(tree.nodes['.'], urls(tree), lambda *_: pytest.fail('nothing to upload'))
+    assert result.strip()
+
+
+def test_link_outside_source_is_not_read(tree_factory, tmp_path):
+    (tmp_path / 'outside.png').write_bytes(b'secret')
+    tree = tree_factory({'README.md':'![x](../outside.png) [code](../app/x.py)'})
+    assert not tree.assets
+    assert 'escapes source directory' in ' '.join(tree.warnings)
 
 
 def test_empty_tree_refused(tree_factory):

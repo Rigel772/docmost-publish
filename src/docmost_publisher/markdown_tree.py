@@ -63,16 +63,6 @@ def walk_tokens(tokens: list[dict]) -> Iterator[dict]:
         yield from walk_tokens(token.get("children", []))
 
 
-def plain_text(tokens: list[dict]) -> str:
-    def one(t: dict) -> str:
-        if "children" in t:
-            return "".join(one(x) for x in t["children"])
-        if t["type"] in {"softbreak", "linebreak"}:
-            return " "
-        return str(t.get("raw", ""))
-    return html.unescape("".join(one(t) for t in tokens))
-
-
 def clean_title(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
@@ -291,33 +281,21 @@ class SourceTree:
             raise PublisherError("Source snapshot exceeds source.max_total_bytes")
         return data
 
-    def _document(self, path: Path) -> tuple[list[dict], Any, str | None]:
+    def _document(self, path: Path) -> tuple[list[dict], Any]:
         try:
             text = self._read(path, self.source["max_markdown_bytes"]).decode("utf-8-sig")
         except UnicodeDecodeError as exc:
             raise PublisherError(f"Markdown is not UTF-8: {path}") from exc
         text = text.replace("\r\n", "\n").replace("\r", "\n")
-        title = None
         lines = text.splitlines(keepends=True)
         if lines and lines[0].strip() == "---":
+            # Front matter is not published; it plays no part in page titles.
             end = next((i for i in range(1, len(lines)) if lines[i].strip() in {"---", "..."}), None)
-            if end is None:
-                raise PublisherError(f"Unclosed YAML front matter: {path}")
-            metadata = load_yaml("".join(lines[1:end])) or {}
-            if not isinstance(metadata, dict):
-                raise PublisherError(f"Front matter must be a mapping: {path}")
-            title = metadata.get("title")
-            if title is not None and (not isinstance(title, str) or not clean_title(title)):
-                raise PublisherError(f"Front-matter title must be a nonempty string: {path}")
-            text = "".join(lines[end + 1:])
+            if end is not None:
+                text = "".join(lines[end + 1:])
         tokens, state = self.parser.parse(text)
-        if not title:
-            for token in walk_tokens(tokens):
-                if token["type"] == "heading":
-                    title = plain_text(token.get("children", []))
-                    break
         self.markdown_count += 1
-        return tokens, state, clean_title(title) if title else None
+        return tokens, state
 
     def build(self) -> "SourceTree":
         if not self.root.is_dir() or self.root == Path("/"):
@@ -343,8 +321,9 @@ class SourceTree:
             if len(indexes) > 1:
                 raise PublisherError(f"Multiple directory index files: {directory}")
             index = indexes[0] if indexes else None
-            tokens, state, title = self._document(index) if index else ([], None, None)
-            node = PageSource(relative, parent, self.root_title if parent is None else (title or directory.name),
+            tokens, state = self._document(index) if index else ([], None)
+            # Page titles are the exact file/directory names; content never renames a page.
+            node = PageSource(relative, parent, self.root_title if parent is None else directory.name,
                               True, index, tokens, state)
             self.nodes[relative] = node
             self.aliases[relative] = relative
@@ -358,8 +337,8 @@ class SourceTree:
                 if path == index:
                     continue
                 key = path.relative_to(self.root).as_posix()
-                body, file_state, file_title = self._document(path)
-                self.nodes[key] = PageSource(key, relative, file_title or path.stem, False, path, body, file_state)
+                body, file_state = self._document(path)
+                self.nodes[key] = PageSource(key, relative, path.stem, False, path, body, file_state)
                 self.aliases[key] = key
                 node.children.append(key)
             if parent is not None and not index and not node.children:
@@ -378,9 +357,20 @@ class SourceTree:
                 if token["type"] in {"link", "image"}:
                     url = token["attrs"]["url"]
                     key = (node.key, url, token["type"] == "image")
-                    self.targets[key] = self._resolve(node, url, key[2])
+                    # Unresolvable links never block publication: nothing is read
+                    # or uploaded for them, and the original URL is kept as-is.
+                    total_bytes = self.total_bytes
+                    try:
+                        self.targets[key] = self._resolve(node, url, key[2])
+                    except PublisherError as exc:
+                        self.total_bytes = total_bytes
+                        self.warnings.add(f"{exc} (left unchanged)")
+                        self.targets[key] = Target("external", url)
                 elif token["type"] in {"inline_html", "block_html"}:
-                    HTMLReferenceChecker().feed(token["raw"])
+                    try:
+                        HTMLReferenceChecker().feed(token["raw"])
+                    except PublisherError as exc:
+                        self.warnings.add(f"{exc} in {node.key} (left unchanged)")
         # Force every renderer path to run before any remote destructive operation.
         preview_urls = {key: f"https://preview.invalid/p/{quote(key, safe='')}" for key in self.nodes}
         for node in self.nodes.values():
