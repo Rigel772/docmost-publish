@@ -1,0 +1,24 @@
+version: 1
+
+docmost:
+  url: "https://wiki.example.com"
+  auth:
+    method: "session"
+    profile: "default"
+  space: "Engineering"
+  root:
+    title: "ERP documentation"
+    # id: "existing-root-page-uuid"
+
+source:
+  path: "."
+  index_file: "README.md"
+  exclude:
+    - "**/node_modules/**"
+    - "**/vendor/**"
+
+publish:
+  mode: "replace_tree"
+  preserve_root: true
+  deletion: "trash"
+  allow_empty: false
