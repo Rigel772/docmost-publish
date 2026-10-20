@@ -98,6 +98,38 @@ def test_hidden_and_excluded_files(tree_factory):
     assert set(tree.nodes) == {'.'}
 
 
+@pytest.mark.parametrize('kind', ['file', 'directory', 'broken', 'loop', 'index', 'asset'])
+@pytest.mark.parametrize('referenced', [False, True])
+def test_source_symlinks_are_silently_ignored(tree_factory, tmp_path, capsys, caplog, kind, referenced):
+    names = {'file': 'UI_HANDOFF.md', 'directory': 'linked-docs', 'broken': 'missing.md',
+             'loop': 'loop', 'index': 'README.md', 'asset': 'image.png'}
+    name = names[kind]
+    url = f'{name}/secret.md' if kind in {'directory', 'loop'} else name
+    body = f'![linked]({url})' if kind == 'asset' else f'[linked]({url})'
+    original = tree_factory({'guide.md': body if referenced else 'Regular document',
+                             'modules/calendar/notes.md': 'Calendar notes'})
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (outside / 'secret.md').write_bytes(b'\xffsecret')
+    (outside / 'image.png').write_bytes(b'secret image')
+    targets = {'file': outside / 'secret.md', 'directory': outside, 'broken': outside / 'missing.md',
+               'loop': original.root, 'index': outside / 'secret.md', 'asset': outside / 'image.png'}
+    (original.root / name).symlink_to(targets[kind], target_is_directory=kind in {'directory', 'loop'})
+
+    tree = type(original)(original.root, original.config_path, original.root_title, original.source,
+                          original.publish, original.links, original.asset_config, original.scratch).build()
+
+    assert set(tree.nodes) == {'.', 'guide.md', 'modules', 'modules/calendar', 'modules/calendar/notes.md'}
+    assert tree.markdown_count == 2
+    assert not tree.assets
+    assert not tree.warnings
+    if referenced:
+        result = tree.render(tree.nodes['guide.md'], urls(tree), lambda *_: pytest.fail('nothing to upload'))
+        assert url in result
+    assert capsys.readouterr() == ('', '')
+    assert not caplog.records
+
+
 def test_duplicate_index_rejected(tree_factory):
     with pytest.raises(PublisherError, match='Multiple directory index'):
         tree_factory({'README.md':'a', 'readme.md':'b'})

@@ -286,6 +286,8 @@ page. Its configured index file supplies that page's body. An index is not
 published as an additional child. Without an index, the directory page gets a
 generated contents list. Asset-only and empty directories are omitted. Other
 `.md` and `.markdown` files become child pages. Hidden paths are excluded.
+Symlinks in the source tree (files, directories, and broken links) are silently
+skipped; their targets are never traversed, read, or uploaded.
 Directory traversal and sibling creation are deterministic: directories first,
 then files, each sorted by name (case-insensitive, with exact spelling as tie-break).
 This is a deterministic publisher order, not a copy of any existing manual order.
@@ -315,10 +317,12 @@ Defaults allow PNG, JPG/JPEG, GIF, WEBP, AVIF, BMP, PDF, TXT, and CSV. Configure
 becomes a page, not an attachment. Asset size defaults to 20 MiB; server or reverse
 proxy limits may be lower. SVG is not included in the default allowlist.
 
-Links and images that cannot be resolved (missing or excluded targets, paths
-escaping the source, symlinks, unsupported schemes, non-allowlisted or oversized
-attachments) never stop publication: they are reported as warnings and published
-with their original URL, and their targets are never read or uploaded. The same
+Links and images pointing to symlinks, or through symlinked directories, are
+silently left with their original URL; their targets are never read or uploaded.
+Other links and images that cannot be resolved (missing or excluded targets, paths
+escaping the source, unsupported schemes, non-allowlisted or oversized attachments)
+never stop publication: they are reported as warnings and published with their
+original URL, and their targets are never read or uploaded. The same
 applies to raw HTML with local links/images, CSS `url()`, or `srcset`. Unsupported
 wiki-link syntax is not resolved. Oversized Markdown, duplicate indexes,
 invalid/duplicate YAML keys, and an unexpectedly empty tree still stop local

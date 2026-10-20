@@ -312,7 +312,7 @@ class SourceTree:
                 if self.ignored(rel):
                     continue
                 if entry.is_symlink():
-                    raise PublisherError(f"Symlink in source; remove or exclude it: {entry}")
+                    continue
                 if entry.is_dir():
                     dirs.append(entry)
                 elif entry.suffix.lower() in {".md", ".markdown"}:
@@ -393,7 +393,14 @@ class SourceTree:
         if "\x00" in path_text or "\\" in path_text:
             raise PublisherError(f"Invalid local URL in {node.key}: {url!r}")
         base = node.source_file.parent if node.source_file else self.root / node.key
-        path = self._safe_path(self.root / path_text.lstrip("/") if path_text.startswith("/") else base / path_text)
+        path = Path(os.path.abspath(self.root / path_text.lstrip("/") if path_text.startswith("/") else base / path_text))
+        if path.is_relative_to(self.root):
+            current = self.root
+            for part in path.relative_to(self.root).parts:
+                current = current / part
+                if current.is_symlink():
+                    return Target("external", url)
+        path = self._safe_path(path)
         relative = path.relative_to(self.root).as_posix()
         if relative != "." and self.ignored(relative):
             raise PublisherError(f"Link targets an excluded/hidden file in {node.key}: {url}")
